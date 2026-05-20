@@ -1,0 +1,21 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Configure PC Agent",
+                "description": "Open the PC Agent app → Integrations → click **Generate** to get your setup token. Paste it below.",
+                "data": {
+                    "token": "Setup Token"
+                }
+            }
+        },
+        "error": {
+            "token_invalid": "Token not found or expired — generate a new one in the PC Agent app",
+            "cannot_connect": "Cannot connect to server",
+            "unknown": "Unexpected error"
+        },
+        "abort": {
+            "already_configured": "Device already configured"
+        }
+    }
+}
