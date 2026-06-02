@@ -1,5 +1,6 @@
 from homeassistant.components.button import ButtonEntity, ButtonDeviceClass
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -11,7 +12,23 @@ from .coordinator import PcsAgentCoordinator
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    pass
+    coordinator: PcsAgentCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([PcsAgentRefreshButton(coordinator, entry)])
+
+
+class PcsAgentRefreshButton(CoordinatorEntity, ButtonEntity):
+    """Refresh on-demand: aggiorna subito dispositivi/app/camera senza polling continuo."""
+    _attr_icon = "mdi:refresh"
+    _attr_name = "Refresh devices"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: PcsAgentCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_refresh"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_request_refresh()
 
 
 class PcsAgentButton(CoordinatorEntity, ButtonEntity):
