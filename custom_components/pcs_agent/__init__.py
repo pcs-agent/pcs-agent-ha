@@ -9,7 +9,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN, CONF_DEVICE_ID, CONF_HOST, CONF_PORT, AGENT_PORT,
-    CONF_SERVER_URL, CONF_USER_ID,
+    CONF_SERVER_URL, CONF_USER_ID, CONF_MAC,
 )
 from .coordinator import PcsAgentCoordinator
 from .lovelace_dashboard import async_setup_dashboard
@@ -42,11 +42,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not host:
         # Agent offline ora → non possiamo trovare l'IP. Riprova al prossimo avvio.
         return False
-    hass.config_entries.async_update_entry(
-        entry,
-        data={CONF_HOST: host, CONF_PORT: AGENT_PORT, CONF_DEVICE_ID: device_id},
-        version=2,
-    )
+    new_data = {CONF_HOST: host, CONF_PORT: AGENT_PORT, CONF_DEVICE_ID: device_id}
+    # Preserva il MAC per Wake-on-LAN (HA-side magic packet, funziona a PC spento)
+    if data.get(CONF_MAC):
+        new_data[CONF_MAC] = data[CONF_MAC]
+    hass.config_entries.async_update_entry(entry, data=new_data, version=2)
     return True
 
 
@@ -54,6 +54,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if CONF_HOST not in entry.data:
         # Migrazione non ancora riuscita (agent era offline) → ritenta
         raise ConfigEntryNotReady("Waiting for PC Agent to be reachable for migration")
+    # Backfill MAC (per WOL) se manca — entry migrate prima del fix mac
+    if not entry.data.get(CONF_MAC):
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    f"http://{entry.data[CONF_HOST]}:{entry.data.get(CONF_PORT, AGENT_PORT)}/ping",
+                    timeout=aiohttp.ClientTimeout(total=4),
+                ) as r:
+                    if r.status == 200:
+                        mac = (await r.json()).get("mac", "")
+                        if mac:
+                            hass.config_entries.async_update_entry(
+                                entry, data={**entry.data, CONF_MAC: mac})
+        except Exception:
+            pass
     coordinator = PcsAgentCoordinator(
         hass,
         entry.data[CONF_HOST],

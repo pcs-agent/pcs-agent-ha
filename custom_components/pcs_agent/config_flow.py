@@ -10,7 +10,7 @@ from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
-from .const import DOMAIN, CONF_HOST, CONF_PORT, CONF_DEVICE_ID, AGENT_PORT
+from .const import DOMAIN, CONF_HOST, CONF_PORT, CONF_DEVICE_ID, CONF_MAC, AGENT_PORT
 
 
 async def _probe_agent(host: str, port: int) -> dict | None:
@@ -36,6 +36,7 @@ class PcsAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._port: int = AGENT_PORT
         self._device_id: str | None = None
         self._name: str | None = None
+        self._mac: str = ""
 
     # ── Zeroconf auto-discovery ──────────────────────────────────────
     async def async_step_zeroconf(self, discovery_info: ZeroconfServiceInfo) -> FlowResult:
@@ -44,11 +45,12 @@ class PcsAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         props = discovery_info.properties or {}
         device_id = props.get("device_id")
         name = props.get("device_name", "PC")
+        info = await _probe_agent(host, port)
         if not device_id:
-            info = await _probe_agent(host, port)
             device_id = info.get("device_id") if info else None
         if not device_id:
             return self.async_abort(reason="cannot_connect")
+        self._mac = (info or {}).get("mac", "") or props.get("mac", "")
 
         await self.async_set_unique_id(device_id)
         self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
@@ -56,8 +58,8 @@ class PcsAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._host = host
         self._port = port
         self._device_id = device_id
-        self._name = name
-        self.context["title_placeholders"] = {"name": f"PC Agent — {name}"}
+        self._name = info.get("device_name", name) if info else name
+        self.context["title_placeholders"] = {"name": f"PC Agent — {self._name}"}
         return await self.async_step_confirm()
 
     async def async_step_confirm(self, user_input: dict | None = None) -> FlowResult:
@@ -68,6 +70,7 @@ class PcsAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_HOST: self._host,
                     CONF_PORT: self._port,
                     CONF_DEVICE_ID: self._device_id,
+                    CONF_MAC: self._mac,
                 },
             )
         return self.async_show_form(
@@ -89,8 +92,9 @@ class PcsAgentConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(device_id)
                 self._abort_if_unique_id_configured(updates={CONF_HOST: host, CONF_PORT: port})
                 return self.async_create_entry(
-                    title=f"PC Agent — {device_id[:12]}",
-                    data={CONF_HOST: host, CONF_PORT: port, CONF_DEVICE_ID: device_id},
+                    title=f"PC Agent — {info.get('device_name', device_id[:12])}",
+                    data={CONF_HOST: host, CONF_PORT: port, CONF_DEVICE_ID: device_id,
+                          CONF_MAC: info.get("mac", "")},
                 )
         schema = vol.Schema({
             vol.Required(CONF_HOST): str,

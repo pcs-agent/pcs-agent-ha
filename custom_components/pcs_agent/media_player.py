@@ -58,6 +58,8 @@ class PcsAgentComputerPlayer(CoordinatorEntity, MediaPlayerEntity):
     _attr_supported_features = (
         MediaPlayerEntityFeature.VOLUME_SET
         | MediaPlayerEntityFeature.VOLUME_STEP
+        | MediaPlayerEntityFeature.TURN_ON
+        | MediaPlayerEntityFeature.TURN_OFF
     )
     _attr_icon = "mdi:desktop-classic"
     _attr_name = "Computer"
@@ -73,18 +75,29 @@ class PcsAgentComputerPlayer(CoordinatorEntity, MediaPlayerEntity):
             manufacturer="PCS Agent",
             model="PC Agent",
             sw_version="1.0.0",
-            configuration_url=entry.data.get("server_url", "https://pcs-agent.com"),
         )
 
     @property
+    def available(self) -> bool:
+        # SEMPRE disponibile: anche a PC spento serve per Wake-on-LAN (HA manda magic packet).
+        return True
+
+    def _agent_online(self) -> bool:
+        # Stato fresco (<30s) = agent raggiungibile = PC acceso
+        try:
+            import time as _t
+            return bool(self.coordinator.data and self.coordinator.data.get("state")) and \
+                   (_t.time() - self.coordinator.state_ts) < 30
+        except Exception:
+            return bool(self.coordinator.data and self.coordinator.data.get("state"))
+
+    @property
     def state(self) -> MediaPlayerState:
-        if not self.coordinator.data:
-            return MediaPlayerState.OFF
-        return MediaPlayerState.ON
+        return MediaPlayerState.ON if self._agent_online() else MediaPlayerState.OFF
 
     @property
     def volume_level(self) -> float | None:
-        if not self.coordinator.data:
+        if not self._agent_online():
             return None
         vol = self.coordinator.data.get("state", {}).get("volume") or 50
         return float(vol) / 100.0
