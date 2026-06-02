@@ -111,3 +111,25 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
             else:
                 result[mode_id] = {"name": mode_id, "active": bool(val)}
         return result
+
+    @property
+    def local_ip(self) -> str:
+        return (self.data or {}).get("state", {}).get("local_ip", "") or ""
+
+    def _get_cameras(self) -> list[dict]:
+        """Lista camera dal PC (consent-gated lato agent).
+        Ogni entry: {id: 'screen0'|'webcam0', name, type}. RTSP = rtsp://{local_ip}:8554/{id}."""
+        cams = (self.data or {}).get("state", {}).get("cameras", []) or []
+        result = []
+        for c in cams:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("id")
+            if not cid:
+                continue
+            result.append({
+                "id": cid,
+                "name": c.get("name", cid),
+                "type": c.get("type", "screen"),
+            })
+        return result

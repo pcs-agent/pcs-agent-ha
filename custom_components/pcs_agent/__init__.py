@@ -8,7 +8,7 @@ from .const import DOMAIN, CONF_SERVER_URL, CONF_USER_ID, CONF_DEVICE_ID, CONF_H
 from .coordinator import PcsAgentCoordinator
 from .lovelace_dashboard import async_setup_dashboard
 
-PLATFORMS = ["media_player", "select", "switch", "light", "button", "binary_sensor", "sensor", "number"]
+PLATFORMS = ["media_player", "select", "switch", "light", "button", "binary_sensor", "sensor", "number", "camera"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -84,14 +84,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async_register(hass, DOMAIN, "PC Agent State Push", webhook_id, handle_webhook)
     entry.async_on_unload(lambda: async_unregister(hass, webhook_id))
-
-    # Manda URL webhook direttamente al PC — così pushherà stato senza passare dal server
-    try:
-        from homeassistant.components.webhook import async_generate_url
-        webhook_url = async_generate_url(hass, webhook_id)
-        await coordinator.send_command("set_ha_webhook", webhook_url=webhook_url)
-    except Exception:
-        pass
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

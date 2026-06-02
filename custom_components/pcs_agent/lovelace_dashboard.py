@@ -178,6 +178,18 @@ def _build_cards_for_device(
     if lock:
         cards.append({"type": "tile", "entity": lock, "name": "Blocca Schermo"})
 
+    # Camera (screen + webcam) — picture-entity con live view WebRTC nativo HA 2024.11+
+    for cam in coordinator._get_cameras():
+        cam_eid = _eid(hass, "camera", f"{eid}_camera_{cam['id']}")
+        if cam_eid:
+            cards.append({
+                "type": "picture-entity",
+                "entity": cam_eid,
+                "name": cam.get("name", cam["id"]),
+                "camera_view": "live",
+                "show_state": False,
+            })
+
     for app_id, app_data in coordinator._get_apps().items():
         sw_eid = _eid(hass, "switch", f"{eid}_app_{app_id}")
         vol_eid = _eid(hass, "media_player", f"{eid}_app_{app_id}")
