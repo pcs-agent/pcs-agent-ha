@@ -1,21 +1,26 @@
 {
     "config": {
+        "flow_title": "{name}",
         "step": {
+            "confirm": {
+                "title": "PC Agent found",
+                "description": "Add **{name}** at {host}? Make sure Home Assistant is connected in the PC Agent app (Integrations → Connect)."
+            },
             "user": {
-                "title": "Configure PC Agent",
-                "description": "Open the PC Agent app → Integrations → click **Generate** to get your setup token. Paste it below.",
+                "title": "Add PC Agent (manual)",
+                "description": "Enter the LAN IP of the PC running PC Agent. The app must be running with Home Assistant connected.",
                 "data": {
-                    "token": "Setup Token"
+                    "host": "PC IP address",
+                    "port": "Port"
                 }
             }
         },
         "error": {
-            "token_invalid": "Token not found or expired — generate a new one in the PC Agent app",
-            "cannot_connect": "Cannot connect to server",
-            "unknown": "Unexpected error"
+            "cannot_connect": "Cannot reach PC Agent — check the IP and that the app is running on the LAN"
         },
         "abort": {
-            "already_configured": "Device already configured"
+            "already_configured": "PC Agent already configured",
+            "cannot_connect": "Could not connect to the discovered PC Agent"
         }
     }
 }

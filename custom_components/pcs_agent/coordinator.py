@@ -5,30 +5,30 @@ import aiohttp
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, SCAN_INTERVAL, CONF_HA_SECRET
+from .const import DOMAIN, SCAN_INTERVAL, AGENT_PORT
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class PcsAgentCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass: HomeAssistant, server_url: str, user_id: str, device_id: str, ha_secret: str = ""):
+    """LOCAL-ONLY: legge lo stato direttamente dall'agent sulla LAN (http://{host}:8765/state).
+    Niente cloud/VPS. HA disconnesso nell'agent → /state 503 → entity unavailable."""
+
+    def __init__(self, hass: HomeAssistant, host: str, device_id: str, port: int = AGENT_PORT):
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=SCAN_INTERVAL),
         )
-        self.server_url = server_url.rstrip("/")
-        self.user_id = user_id
+        self.host = host
+        self.port = port
         self.device_id = device_id
-        self.ha_secret = ha_secret
         self._session: aiohttp.ClientSession | None = None
 
     @property
-    def _auth_headers(self) -> dict:
-        if self.ha_secret:
-            return {"Authorization": f"Bearer {self.ha_secret}"}
-        return {}
+    def _base(self) -> str:
+        return f"http://{self.host}:{self.port}"
 
     def async_push_update(self, data: dict) -> None:
         self.async_set_updated_data(data)
@@ -40,49 +40,25 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict:
         try:
-            url = f"{self.server_url}/api/ha/state/{self.device_id}"
             async with self._get_session().get(
-                url,
-                params={"user_id": self.user_id},
-                headers=self._auth_headers,
-                timeout=aiohttp.ClientTimeout(total=10),
+                f"{self._base}/state",
+                timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
+                if resp.status == 503:
+                    # HA non connesso nell'agent → stato vuoto → entity unavailable
+                    return {"state": {}}
                 raise UpdateFailed(f"HTTP {resp.status}")
         except aiohttp.ClientError as e:
-            raise UpdateFailed(f"Connection error: {e}")
+            raise UpdateFailed(f"Agent unreachable: {e}")
 
     async def send_command(self, action: str, **kwargs) -> bool:
-        # Prova locale prima se abbiamo l'IP del PC sulla LAN
-        local_ip = (self.data or {}).get("state", {}).get("local_ip", "")
-        if local_ip:
-            try:
-                async with self._get_session().post(
-                    f"http://{local_ip}:8765/",
-                    json={"action": action, **kwargs},
-                    timeout=aiohttp.ClientTimeout(total=2),
-                ) as resp:
-                    if resp.status == 200:
-                        _LOGGER.debug("HA local command: %s → %s:8765", action, local_ip)
-                        return True
-            except Exception:
-                pass
-
-        # Fallback VPS
         try:
-            payload = {
-                "user_id": self.user_id,
-                "device_id": self.device_id,
-                "action": action,
-                **kwargs,
-            }
-            url = f"{self.server_url}/api/ha/command"
             async with self._get_session().post(
-                url,
-                json=payload,
-                headers=self._auth_headers,
-                timeout=aiohttp.ClientTimeout(total=10),
+                f"{self._base}/",
+                json={"action": action, **kwargs},
+                timeout=aiohttp.ClientTimeout(total=3),
             ) as resp:
                 return resp.status == 200
         except Exception:

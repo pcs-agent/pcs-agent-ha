@@ -1,23 +1,64 @@
+import aiohttp
+
 from homeassistant.components.webhook import async_register, async_unregister
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, CONF_SERVER_URL, CONF_USER_ID, CONF_DEVICE_ID, CONF_HA_SECRET
+from .const import (
+    DOMAIN, CONF_DEVICE_ID, CONF_HOST, CONF_PORT, AGENT_PORT,
+    CONF_SERVER_URL, CONF_USER_ID,
+)
 from .coordinator import PcsAgentCoordinator
 from .lovelace_dashboard import async_setup_dashboard
 
 PLATFORMS = ["media_player", "select", "switch", "light", "button", "binary_sensor", "sensor", "number", "camera"]
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrazione automatica v1 (cloud) → v2 (local-only).
+    Recupera l'IP LAN dell'agent dall'ultimo stato cloud UNA volta, poi full local."""
+    if entry.version >= 2 or CONF_HOST in entry.data:
+        return True
+    data = dict(entry.data)
+    device_id = data.get(CONF_DEVICE_ID, "")
+    server = data.get(CONF_SERVER_URL, "https://pcs-agent.com").rstrip("/")
+    user_id = data.get(CONF_USER_ID, "")
+    host = ""
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                f"{server}/api/ha/state/{device_id}",
+                params={"user_id": user_id},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as r:
+                if r.status == 200:
+                    j = await r.json()
+                    host = (j.get("state", {}) or {}).get("local_ip", "") or ""
+    except Exception:
+        host = ""
+    if not host:
+        # Agent offline ora → non possiamo trovare l'IP. Riprova al prossimo avvio.
+        return False
+    hass.config_entries.async_update_entry(
+        entry,
+        data={CONF_HOST: host, CONF_PORT: AGENT_PORT, CONF_DEVICE_ID: device_id},
+        version=2,
+    )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if CONF_HOST not in entry.data:
+        # Migrazione non ancora riuscita (agent era offline) → ritenta
+        raise ConfigEntryNotReady("Waiting for PC Agent to be reachable for migration")
     coordinator = PcsAgentCoordinator(
         hass,
-        entry.data[CONF_SERVER_URL],
-        entry.data[CONF_USER_ID],
+        entry.data[CONF_HOST],
         entry.data[CONF_DEVICE_ID],
-        ha_secret=entry.data.get(CONF_HA_SECRET, ""),
+        port=entry.data.get(CONF_PORT, AGENT_PORT),
     )
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -99,15 +140,19 @@ def _hide_select_entities(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: PcsAgentCoordinator
 ) -> None:
     ent_reg = er.async_get(hass)
-    uids = [f"{entry.entry_id}_power"] + [
-        f"{entry.entry_id}_mode_{mid}" for mid in coordinator._get_modes()
-    ]
-    for uid in uids:
-        eid = ent_reg.async_get_entity_id("select", DOMAIN, uid)
+    # Solo il Power select resta nascosto (power è sul Computer media_player).
+    power_eid = ent_reg.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_power")
+    if power_eid:
+        cur = ent_reg.entities.get(power_eid)
+        if cur and cur.entity_category != EntityCategory.CONFIG:
+            ent_reg.async_update_entity(power_eid, entity_category=EntityCategory.CONFIG)
+    # Mode selects: VISIBILI come controlli normali (rimuovi CONFIG se messo in passato).
+    for mid in coordinator._get_modes():
+        eid = ent_reg.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode_{mid}")
         if eid:
-            current = ent_reg.entities.get(eid)
-            if current and current.entity_category != EntityCategory.CONFIG:
-                ent_reg.async_update_entity(eid, entity_category=EntityCategory.CONFIG)
+            cur = ent_reg.entities.get(eid)
+            if cur and cur.entity_category is not None:
+                ent_reg.async_update_entity(eid, entity_category=None)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
