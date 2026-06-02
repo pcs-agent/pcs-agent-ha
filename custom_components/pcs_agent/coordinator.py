@@ -12,13 +12,11 @@ _LOGGER = logging.getLogger(__name__)
 
 class PcsAgentCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, server_url: str, user_id: str, device_id: str, ha_secret: str = ""):
-        # NO polling automatico: aggiornamenti via webhook push dall'agent (real-time)
-        # + tasto "Refresh devices" manuale. update_interval=None → zero chiamate VPS inutili.
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=None,
+            update_interval=timedelta(seconds=SCAN_INTERVAL),
         )
         self.server_url = server_url.rstrip("/")
         self.user_id = user_id
