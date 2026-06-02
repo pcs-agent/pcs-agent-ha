@@ -5,6 +5,11 @@ import logging
 import aiohttp
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera.webrtc import (
+    WebRTCAnswer,
+    WebRTCError,
+    WebRTCSendMessage,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
@@ -45,7 +50,7 @@ async def async_setup_entry(
 
 
 class PcsAgentCamera(CoordinatorEntity, Camera):
-    """Camera PC (screen o webcam) via go2rtc RTSP. HA 2024.11+ → WebRTC nativo."""
+    """Camera PC (screen o webcam) — WebRTC live nativo via go2rtc (no HLS/recording)."""
 
     _attr_supported_features = CameraEntityFeature.STREAM
 
@@ -72,25 +77,65 @@ class PcsAgentCamera(CoordinatorEntity, Camera):
 
     @property
     def available(self) -> bool:
-        # Disponibile solo se PC raggiungibile (local_ip noto) + camera ancora nello state (consenso attivo)
         if not self._ip:
             return False
         return any(c["id"] == self._cam_id for c in self.coordinator._get_cameras())
 
     async def stream_source(self) -> str | None:
+        """RTSP fallback (HLS) — usato solo se WebRTC non disponibile."""
         ip = self._ip
         if not ip:
             return None
-        # RTSP go2rtc → HA stream/WebRTC nativo
         return f"rtsp://{ip}:{GO2RTC_RTSP_PORT}/{self._cam_id}"
+
+    # ── WebRTC live nativo (proxy al go2rtc del PC Agent) ───────────────
+    # Implementare async_handle_async_webrtc_offer fa sì che HA 2024.11+
+    # usi WebRTC (frontend_stream_type=WEB_RTC) invece di HLS. Zero recording.
+    async def async_handle_async_webrtc_offer(
+        self, offer_sdp: str, session_id: str, send_message: WebRTCSendMessage
+    ) -> None:
+        ip = self._ip
+        if not ip:
+            send_message(WebRTCError("pcsagent_offline", "PC Agent offline (no local IP)"))
+            return
+        # go2rtc WebRTC API: POST {type:offer, sdp} → {type:answer, sdp}
+        url = f"http://{ip}:{GO2RTC_API_PORT}/api/webrtc?src={self._cam_id}"
+        try:
+            session = self.coordinator._get_session()
+            async with session.post(
+                url,
+                json={"type": "offer", "sdp": offer_sdp},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    send_message(WebRTCError("go2rtc_http", f"go2rtc HTTP {resp.status}: {body[:120]}"))
+                    return
+                data = await resp.json()
+            answer = data.get("sdp")
+            if not answer:
+                send_message(WebRTCError("go2rtc_no_answer", "go2rtc returned no SDP answer"))
+                return
+            send_message(WebRTCAnswer(answer))
+        except Exception as e:  # noqa: BLE001
+            _LOGGER.warning("WebRTC offer %s failed: %s", self._cam_id, e)
+            send_message(WebRTCError("go2rtc_error", str(e)))
+
+    async def async_on_webrtc_candidate(self, session_id: str, candidate) -> None:
+        # go2rtc usa SDP non-trickle (candidati già nell'answer) → no-op
+        return
+
+    @callback
+    def close_webrtc_session(self, session_id: str) -> None:
+        return
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
+        """Snapshot live (frame al volo da go2rtc) per la sola anteprima card. Nessuna registrazione."""
         ip = self._ip
         if not ip:
             return None
-        # Snapshot JPEG da go2rtc API
         url = f"http://{ip}:{GO2RTC_API_PORT}/api/frame.jpeg?src={self._cam_id}"
         try:
             session = self.coordinator._get_session()
@@ -99,6 +144,6 @@ class PcsAgentCamera(CoordinatorEntity, Camera):
             ) as resp:
                 if resp.status == 200:
                     return await resp.read()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             _LOGGER.debug("Snapshot %s failed: %s", self._cam_id, e)
         return None
