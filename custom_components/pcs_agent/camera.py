@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import aiohttp
 
@@ -24,6 +25,9 @@ _LOGGER = logging.getLogger(__name__)
 # Porte go2rtc esposte dal PC Agent sulla LAN
 GO2RTC_RTSP_PORT = 8554
 GO2RTC_API_PORT = 1984
+
+# Stato più vecchio di questo = agent disconnesso/fermo → camera unavailable
+STATE_FRESH_SECONDS = 30
 
 
 async def async_setup_entry(
@@ -77,9 +81,16 @@ class PcsAgentCamera(CoordinatorEntity, Camera):
 
     @property
     def available(self) -> bool:
+        # Unavailable se: PC senza IP, camera non in lista (HA non connesso / consent off),
+        # o stato vecchio (agent fermo/crashato → niente push fresco).
         if not self._ip:
             return False
-        return any(c["id"] == self._cam_id for c in self.coordinator._get_cameras())
+        if not any(c["id"] == self._cam_id for c in self.coordinator._get_cameras()):
+            return False
+        ts = self.coordinator.state_ts
+        if ts and (time.time() - ts) > STATE_FRESH_SECONDS:
+            return False
+        return True
 
     async def stream_source(self) -> str | None:
         """RTSP fallback (HLS) — usato solo se WebRTC non disponibile."""

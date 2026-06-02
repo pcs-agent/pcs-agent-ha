@@ -116,6 +116,14 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
     def local_ip(self) -> str:
         return (self.data or {}).get("state", {}).get("local_ip", "") or ""
 
+    @property
+    def state_ts(self) -> float:
+        """Timestamp (epoch) dell'ultimo state pushato dall'agent. 0 se assente."""
+        try:
+            return float((self.data or {}).get("state", {}).get("ts", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
     def _get_cameras(self) -> list[dict]:
         """Lista camera dal PC (consent-gated lato agent).
         Ogni entry: {id: 'screen0'|'webcam0', name, type}. RTSP = rtsp://{local_ip}:8554/{id}."""
