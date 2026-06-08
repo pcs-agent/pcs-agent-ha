@@ -111,4 +111,3 @@ automation:
 
 - PC Agent app running on your PC/Mac
 - Home Assistant 2024.1 or newer
-- Internet connection for cloud fallback (pcs-agent.com)
