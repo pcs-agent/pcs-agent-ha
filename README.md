@@ -11,7 +11,7 @@ Control your Windows or macOS PC directly from Home Assistant with real-time sta
 - **Apps** — per-app ON/OFF toggle with live state from psutil (running/not running)
 - **Modes** — per-mode 3-state selector: `attiva` / `standby` / `disattiva`
 - **Auto-generated Lovelace dashboard** — a "PC Agent" panel appears in the HA sidebar automatically, no manual config needed
-- **Local push** — PC Agent pushes state via webhook when on the same network; falls back to cloud polling
+- **Local push** — PC Agent pushes state via webhook when on the same network.
 
 ---
 
