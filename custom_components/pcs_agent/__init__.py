@@ -50,10 +50,125 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_cleanup_talkback_residues(hass: HomeAssistant) -> None:
+    """Cleanup per chi aggiorna da una versione con talkback:
+    - rimuove lovelace resources del talkback (talkback_card.js, card-mod.js bundled).
+    - rimuove entity stt.* della nostra platform 'stt' (ora deprecata).
+    - rimuove pipeline Assist "Talk to {...}" auto-create.
+    Idempotente. NON tocca card-mod installato manualmente dall'utente."""
+    # 1) lovelace resources
+    try:
+        from homeassistant.components.lovelace import LOVELACE_DATA  # type: ignore[attr-defined]
+        lov = hass.data.get(LOVELACE_DATA)
+        if lov is not None and getattr(lov, "resources", None) is not None:
+            await lov.resources.async_load()
+            for r in list(lov.resources.async_items() or []):
+                url = (r.get("url") or "").split("?", 1)[0]
+                if url in ("/pcs_agent_static/talkback_card.js",
+                           "/pcs_agent_static/card-mod.js"):
+                    try:
+                        await lov.resources.async_delete_item(r.get("id"))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    # 2) STT entity orfane
+    try:
+        reg = er.async_get(hass)
+        for eid, ent in list(reg.entities.items()):
+            if ent.platform == DOMAIN and ent.domain == "stt":
+                reg.async_remove(eid)
+    except Exception:
+        pass
+    # 3) pipeline Assist auto-create che usavano il nostro STT
+    try:
+        from homeassistant.components.assist_pipeline import async_get_pipelines
+        # In HA recente lo store sta in hass.data['assist_pipeline'].pipeline_store
+        pipeline_data = hass.data.get("assist_pipeline")
+        store = getattr(pipeline_data, "pipeline_store", None) if pipeline_data else None
+        if store is not None:
+            for p in list(async_get_pipelines(hass) or []):
+                stt = (p.stt_engine or "")
+                if "pc_agent" in stt and "talkback" in stt:
+                    try:
+                        await store.async_delete_item(p.id)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+
+async def _async_setup_webrtc_card(hass: HomeAssistant) -> None:
+    """Serve la card webrtc-camera (AlexxIT, MIT) bundled in www/ e registra la
+    lovelace resource. La card connette il browser DIRETTAMENTE al go2rtc del PC
+    (opzione server per-card) e ferma lo stream quando non è visibile
+    (background:false + intersection di default) → live solo quando guardi."""
+    # 1) static path (una sola volta per istanza HA)
+    if not hass.data.get(f"{DOMAIN}_static_registered"):
+        try:
+            from pathlib import Path
+            from homeassistant.components.http import StaticPathConfig
+            await hass.http.async_register_static_paths([
+                StaticPathConfig(
+                    "/pcs_agent_static",
+                    str(Path(__file__).parent / "www"),
+                    cache_headers=True,
+                )
+            ])
+            hass.data[f"{DOMAIN}_static_registered"] = True
+        except Exception:
+            pass
+    # 2) lovelace resource (idempotente, version-aware) + cleanup resource obsolete
+    card_version = "2"  # bump a ogni modifica di pcs-camera-card.js (cache-busting)
+    try:
+        from homeassistant.components.lovelace import LOVELACE_DATA  # type: ignore[attr-defined]
+        lov = hass.data.get(LOVELACE_DATA)
+        if lov is None or getattr(lov, "resources", None) is None:
+            return
+        await lov.resources.async_load()
+        wanted = "/pcs_agent_static/pcs-camera-card.js"
+        wanted_full = f"{wanted}?v={card_version}"
+        have = False
+        for r in list(lov.resources.async_items() or []):
+            full = r.get("url") or ""
+            url = full.split("?", 1)[0]
+            if url == wanted:
+                if have:
+                    # duplicato (race fra config entry multiple) → elimina
+                    try:
+                        await lov.resources.async_delete_item(r.get("id"))
+                    except Exception:
+                        pass
+                elif full == wanted_full:
+                    have = True
+                else:
+                    # versione vecchia → aggiorna URL (cache-bust nel browser)
+                    try:
+                        await lov.resources.async_update_item(
+                            r.get("id"), {"res_type": "module", "url": wanted_full})
+                        have = True
+                    except Exception:
+                        pass
+            elif url == "/pcs_agent_static/webrtc-camera.js":
+                # vecchio tentativo: card AlexxIT inutilizzabile senza la sua integrazione
+                try:
+                    await lov.resources.async_delete_item(r.get("id"))
+                except Exception:
+                    pass
+        if not have:
+            await lov.resources.async_create_item(
+                {"res_type": "module", "url": wanted_full}
+            )
+    except Exception:
+        pass
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if CONF_HOST not in entry.data:
         # Migrazione non ancora riuscita (agent era offline) → ritenta
         raise ConfigEntryNotReady("Waiting for PC Agent to be reachable for migration")
+    await _async_cleanup_talkback_residues(hass)
+    await _async_setup_webrtc_card(hass)
     # Backfill MAC (per WOL) se manca — entry migrate prima del fix mac
     if not entry.data.get(CONF_MAC):
         try:
@@ -75,7 +190,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data[CONF_DEVICE_ID],
         port=entry.data.get(CONF_PORT, AGENT_PORT),
     )
-    await coordinator.async_config_entry_first_refresh()
+    # NON usare async_config_entry_first_refresh(): se il PC è spento il primo
+    # poll fallisce e lancerebbe ConfigEntryNotReady → l'integrazione non carica
+    # → nessuna entity → impossibile fare Wake-on-LAN. async_refresh() non lancia:
+    # setta solo last_update_success=False. Il Computer media_player (available=True)
+    # viene creato lo stesso e resta usabile per accendere il PC.
+    await coordinator.async_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     ent_reg = er.async_get(hass)
@@ -142,6 +262,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(lambda: async_unregister(hass, webhook_id))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Talkback rimosso (mic browser richiede HTTPS, non shippabile su LAN).
 
     # Force CONFIG category on all select entities so they don't appear in Controls
     _hide_select_entities(hass, entry, coordinator)

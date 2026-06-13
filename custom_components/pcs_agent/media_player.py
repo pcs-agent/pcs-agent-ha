@@ -76,6 +76,23 @@ class PcsAgentComputerPlayer(CoordinatorEntity, MediaPlayerEntity):
             model="PC Agent",
             sw_version="1.0.0",
         )
+        # Optimistic volume: tiene il valore impostato dall'utente per qualche secondo
+        # così il poll successivo (5s) non lo fa "tornare indietro" (snap-back).
+        self._opt_vol: float | None = None
+        self._opt_ts: float = 0.0
+
+    # Finestra optimistic > SCAN_INTERVAL (5s) → il poll fa in tempo a riflettere il cambio
+    _OPT_WINDOW = 6.0
+
+    def _coord_volume(self) -> float:
+        vol = self.coordinator.data.get("state", {}).get("volume") if self.coordinator.data else None
+        return float(vol) / 100.0 if vol is not None else 0.5
+
+    def _set_optimistic(self, volume: float) -> None:
+        import time as _t
+        self._opt_vol = max(0.0, min(1.0, volume))
+        self._opt_ts = _t.time()
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
@@ -99,17 +116,28 @@ class PcsAgentComputerPlayer(CoordinatorEntity, MediaPlayerEntity):
     def volume_level(self) -> float | None:
         if not self._agent_online():
             return None
-        vol = self.coordinator.data.get("state", {}).get("volume") or 50
-        return float(vol) / 100.0
+        # Durante la finestra optimistic mostra il valore impostato dall'utente
+        # (evita lo snap-back al valore vecchio del poll).
+        import time as _t
+        if self._opt_vol is not None and (_t.time() - self._opt_ts) < self._OPT_WINDOW:
+            return self._opt_vol
+        self._opt_vol = None
+        return self._coord_volume()
 
     async def async_set_volume_level(self, volume: float) -> None:
+        self._set_optimistic(volume)
         await self.coordinator.send_command("set_volume", volume_level=int(volume * 100))
+        await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
+        self._set_optimistic((self.volume_level or self._coord_volume()) + 0.05)
         await self.coordinator.send_command("adjust_volume", volume_delta=5)
+        await self.coordinator.async_request_refresh()
 
     async def async_volume_down(self) -> None:
+        self._set_optimistic((self.volume_level or self._coord_volume()) - 0.05)
         await self.coordinator.send_command("adjust_volume", volume_delta=-5)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:
         if self._mac:
@@ -139,23 +167,46 @@ class PcsAgentAppPlayer(CoordinatorEntity, MediaPlayerEntity):
         self._attr_unique_id = f"{entry.entry_id}_app_{app_id}"
         self._attr_name = app_name
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        self._opt_vol: float | None = None
+        self._opt_ts: float = 0.0
+
+    _OPT_WINDOW = 6.0
 
     @property
     def state(self) -> MediaPlayerState:
         running = self.coordinator._get_apps().get(self._app_id, {}).get("running", False)
         return MediaPlayerState.ON if running else MediaPlayerState.OFF
 
-    @property
-    def volume_level(self) -> float | None:
+    def _coord_volume(self) -> float:
         vol = self.coordinator._get_apps().get(self._app_id, {}).get("volume") or 50
         return float(vol) / 100.0
 
+    def _set_optimistic(self, volume: float) -> None:
+        import time as _t
+        self._opt_vol = max(0.0, min(1.0, volume))
+        self._opt_ts = _t.time()
+        self.async_write_ha_state()
+
+    @property
+    def volume_level(self) -> float | None:
+        import time as _t
+        if self._opt_vol is not None and (_t.time() - self._opt_ts) < self._OPT_WINDOW:
+            return self._opt_vol
+        self._opt_vol = None
+        return self._coord_volume()
+
     async def async_set_volume_level(self, volume: float) -> None:
         # app Windows ascolta "set_volume_app" con campo "app_name"
+        self._set_optimistic(volume)
         await self.coordinator.send_command("set_volume_app", app_name=self._app_id, volume_level=int(volume * 100))
+        await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
+        self._set_optimistic((self.volume_level or self._coord_volume()) + 0.05)
         await self.coordinator.send_command("adjust_volume_app", app_name=self._app_id, volume_delta=5)
+        await self.coordinator.async_request_refresh()
 
     async def async_volume_down(self) -> None:
+        self._set_optimistic((self.volume_level or self._coord_volume()) - 0.05)
         await self.coordinator.send_command("adjust_volume_app", app_name=self._app_id, volume_delta=-5)
+        await self.coordinator.async_request_refresh()

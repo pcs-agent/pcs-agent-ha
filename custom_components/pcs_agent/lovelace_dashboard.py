@@ -113,6 +113,21 @@ async def _write_config_all(hass: HomeAssistant) -> None:
             "views": [{"title": "PC Agent", "icon": "mdi:desktop-classic", "path": "default", "cards": []}],
         }
 
+        # ANTI-FLICKER: il coordinator notifica ogni 5s (poll). Senza questo guard
+        # risalveremmo la dashboard ogni 5s → evento lovelace_updated → il frontend
+        # ricarica la view → le camere si riconnettono (nero→torna) di continuo.
+        # Risalva SOLO se la struttura è davvero cambiata (nuovo PC/app/camera/mode).
+        import json as _json
+        try:
+            sig = _json.dumps(config, sort_keys=True, default=str)
+        except Exception:
+            sig = None
+        sig_key = f"{DOMAIN}_dashboard_sig"
+        if sig is not None and hass.data.get(sig_key) == sig:
+            return
+        if sig is not None:
+            hass.data[sig_key] = sig
+
         # Salva via LovelaceStorage (aggiorna cache in-memory + file + notifica browser)
         saved = False
         try:
@@ -170,6 +185,10 @@ def _build_cards_for_device(
     else:
         cards.extend(computer_group)
 
+    # Talkback rimosso: il mic browser richiede HTTPS, su LAN funziona solo da
+    # localhost del PC stesso → non shippabile per device esterni senza setup
+    # HTTPS (Tailscale/DuckDNS/Nabu). Documentato come limitazione.
+
     monitor = _eid(hass, "switch", f"{eid}_monitor")
     if monitor:
         cards.append({"type": "tile", "entity": monitor, "name": "Monitor"})
@@ -178,16 +197,22 @@ def _build_cards_for_device(
     if lock:
         cards.append({"type": "tile", "entity": lock, "name": "Blocca Schermo"})
 
-    # Camera (screen + webcam) — picture-entity con live view WebRTC nativo HA 2024.11+
+    # Camera (screen + webcam) — card custom:pcs-camera-card (nostra, bundled):
+    # LIVE continuo finché la card è VISIBILE; lo stream si ferma da solo quando
+    # il tab va in background o la card esce dalla viewport (VideoRTC
+    # visibilityCheck + IntersectionObserver). Connessione DIRETTA browser →
+    # go2rtc del PC: zero proxy HA, zero integrazioni extra.
+    # NB: la card webrtc-camera di AlexxIT NON va bene qui — richiede la sua
+    # integrazione (endpoint /api/webrtc/ws) anche con l'opzione server.
     for cam in coordinator._get_cameras():
         cam_eid = _eid(hass, "camera", f"{eid}_camera_{cam['id']}")
         if cam_eid:
             cards.append({
-                "type": "picture-entity",
-                "entity": cam_eid,
-                "name": cam.get("name", cam["id"]),
-                "camera_view": "live",
-                "show_state": False,
+                "type": "custom:pcs-camera-card",
+                "url": cam["id"],
+                "server": f"http://{coordinator.local_ip}:1984/",
+                "intersection": 0.3,
+                "grid_options": {"columns": "full"},
             })
 
     for app_id, app_data in coordinator._get_apps().items():
@@ -226,21 +251,35 @@ def _build_config_multi(
     hass: HomeAssistant,
     pairs: list[tuple[ConfigEntry, PcsAgentCoordinator]],
 ) -> dict:
-    multi = len(pairs) > 1
-    all_cards: list[dict] = []
+    # SECTIONS view: ogni PC = una sezione separata con intestazione (nome PC).
+    # Su telefono le sezioni si impilano (un computer sopra, l'altro sotto) → blocchi
+    # netti, niente cose tutte unite. Su desktop affiancate (max 2 colonne).
+    sections: list[dict] = []
 
     for entry, coordinator in pairs:
         device_cards = _build_cards_for_device(hass, entry, coordinator)
         if not device_cards:
             continue
-        if multi:
-            raw_title = entry.title or entry.data.get("device_id", "PC")
-            device_name = raw_title.split(" — ", 1)[-1] if " — " in raw_title else raw_title
-            all_cards.append({
-                "type": "markdown",
-                "content": f"## {device_name}",
-            })
-        all_cards.extend(device_cards)
+        raw_title = entry.title or entry.data.get("device_id", "PC")
+        device_name = raw_title.split(" — ", 1)[-1] if " — " in raw_title else raw_title
+        sections.append({
+            "type": "grid",
+            "cards": [
+                {
+                    "type": "heading",
+                    "heading": device_name,
+                    "heading_style": "title",
+                    "icon": "mdi:desktop-classic",
+                },
+                *device_cards,
+            ],
+        })
+
+    if not sections:
+        sections = [{
+            "type": "grid",
+            "cards": [{"type": "markdown", "content": "Nessun PC Agent connesso."}],
+        }]
 
     return {
         "title": "PC Agent",
@@ -248,6 +287,8 @@ def _build_config_multi(
             "title": "PC Agent",
             "icon": "mdi:desktop-classic",
             "path": "default",
-            "cards": all_cards,
+            "type": "sections",
+            "max_columns": 2,
+            "sections": sections,
         }],
     }

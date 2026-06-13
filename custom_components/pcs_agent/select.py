@@ -64,6 +64,13 @@ class PcsAgentPowerSelect(CoordinatorEntity, SelectEntity):
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
 
     @property
+    def available(self) -> bool:
+        # SEMPRE disponibile: anche a PC spento/agent giù serve per mandare il
+        # Wake-on-LAN (option "on"). Senza questo il select va "unavailable" e il
+        # dropdown resta vuoto → impossibile accendere.
+        return True
+
+    @property
     def current_option(self) -> str:
         return "standby"
 

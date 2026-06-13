@@ -25,6 +25,8 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
         self.port = port
         self.device_id = device_id
         self._session: aiohttp.ClientSession | None = None
+        # id della pipeline Assist "Talk to {PC}" auto-creata (per la card talkback)
+        self._talkback_pipeline_id: str | None = None
 
     @property
     def _base(self) -> str:
@@ -46,9 +48,10 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
             ) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                if resp.status == 503:
-                    # HA non connesso nell'agent → stato vuoto → entity unavailable
-                    return {"state": {}}
+                # 503 = HA disconnesso nell'agent. Trattato come unreachable:
+                # last_update_success=False → tutte le entity unavailable.
+                # ECCEZIONE: Computer media_player ha available=True (override) →
+                # resta su anche qui per il Wake-on-LAN.
                 raise UpdateFailed(f"HTTP {resp.status}")
         except aiohttp.ClientError as e:
             raise UpdateFailed(f"Agent unreachable: {e}")
