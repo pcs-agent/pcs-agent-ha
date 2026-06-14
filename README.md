@@ -1,17 +1,17 @@
-# PC Agent — Home Assistant Integration
+# PC Agent â€” Home Assistant Integration
 
 Control your Windows or macOS PC directly from Home Assistant with real-time state sync.
 
 ## Features
 
-- **Power control** — 3-state selector: `on` (Wake-on-LAN + wake) / `standby` / `off` (shutdown)
-- **Volume** — system volume slider
-- **Monitor** — turn monitor on/off with real state tracking
-- **Lock screen** — momentary switch
-- **Apps** — per-app ON/OFF toggle with live state from psutil (running/not running)
-- **Modes** — per-mode 3-state selector: `attiva` / `standby` / `disattiva`
-- **Auto-generated Lovelace dashboard** — a "PC Agent" panel appears in the HA sidebar automatically, no manual config needed
-- **Local push** — PC Agent pushes state via webhook when on the same network.
+- **Power control** â€” 3-state selector: `on` (Wake-on-LAN + wake) / `standby` / `off` (shutdown)
+- **Volume** â€” system volume slider
+- **Monitor** â€” turn monitor on/off with real state tracking
+- **Lock screen** â€” momentary switch
+- **Apps** â€” per-app ON/OFF toggle with live running state
+- **Modes** â€” per-mode 3-state selector: `attiva` / `standby` / `disattiva`
+- **Auto-generated Lovelace dashboard** â€” a "PC Agent" panel appears in the HA sidebar automatically, no manual config needed
+- **Local sync** â€” real-time state updates over your local network.
 
 ---
 
@@ -22,22 +22,22 @@ Control your Windows or macOS PC directly from Home Assistant with real-time sta
 | Power | `select` | on / standby / off (momentary, always returns to standby) |
 | Computer | `media_player` | System volume slider + connection state |
 | Monitor | `switch` | Real on/off state |
-| Lock Screen | `switch` | Momentary — locks and returns to off |
-| *App name* | `media_player` | Live running state via psutil, toggle open/close |
+| Lock Screen | `switch` | Momentary â€” locks and returns to off |
+| *App name* | `media_player` | Live running state, toggle open/close |
 | *Mode name* | `select` | attiva / standby / disattiva |
 | Online | `binary_sensor` | Connectivity sensor |
 | PC Volume | `sensor` | Volume % read-only |
 
-> **Power** and **Mode** selects are hidden from the default Controls panel — they appear only in the auto-generated "PC Agent" dashboard with inline buttons.
+> **Power** and **Mode** selects are hidden from the default Controls panel â€” they appear only in the auto-generated "PC Agent" dashboard with inline buttons.
 
 ---
 
 ## Installation via HACS
 
-1. In HACS → **Integrations** → ⋮ → **Custom repositories**
-2. Add `https://github.com/edoardobommarito/pcs-agent` — type **Integration**
+1. In HACS â†’ **Integrations** â†’ â‹® â†’ **Custom repositories**
+2. Add `https://github.com/pcs-agent/pcs-agent-ha` â€” type **Integration**
 3. Install **PC Agent**, restart Home Assistant
-4. Go to **Settings → Devices & Services → Add Integration**, search **PC Agent**
+4. Go to **Settings â†’ Devices & Services â†’ Add Integration**, search **PC Agent**
 
 ## Manual installation
 
@@ -54,9 +54,9 @@ Restart Home Assistant.
 | Field | Description |
 |-------|-------------|
 | Server URL | Leave default (`https://pcs-agent.com`) |
-| User ID | Found in PC Agent app → Account tab |
-| Device ID | Found in PC Agent app → Account tab |
-| MAC Address | Optional — enables Wake-on-LAN |
+| User ID | Found in PC Agent app â†’ Account tab |
+| Device ID | Found in PC Agent app â†’ Account tab |
+| MAC Address | Optional â€” enables Wake-on-LAN |
 
 ---
 
@@ -65,12 +65,12 @@ Restart Home Assistant.
 After setup a **PC Agent** entry appears in the HA sidebar automatically.
 
 Layout:
-- Device name → `[ on ] [ standby ] [ off ]`
-- Volume (Device name) → slider
+- Device name â†’ `[ on ] [ standby ] [ off ]`
+- Volume (Device name) â†’ slider
 - Monitor toggle
 - Lock Screen toggle
-- Per-app toggles (live psutil state)
-- Per-mode → `[ attiva ] [ standby ] [ disattiva ]`
+- Per-app toggles (live running state)
+- Per-mode â†’ `[ attiva ] [ standby ] [ disattiva ]`
 
 ---
 
