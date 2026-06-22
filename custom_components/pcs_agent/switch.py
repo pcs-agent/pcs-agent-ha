@@ -113,16 +113,30 @@ class PcsAgentModeSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_loopmode_{mode_id}"
         self._attr_name = mode_name
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+        self._optimistic: bool | None = None
 
     @property
     def is_on(self) -> bool:
+        # stato REALE da /state; durante la finestra ottimistica usa il valore atteso
+        # così la UI scatta subito invece di aspettare il prossimo poll (l'auto-OFF
+        # via mouse arriva comunque col poll successivo e sovrascrive l'ottimismo)
+        if self._optimistic is not None:
+            return self._optimistic
         return bool(self.coordinator._get_modes().get(self._mode_id, {}).get("active", False))
 
     async def async_turn_on(self, **kwargs) -> None:
+        self._optimistic = True
+        self.async_write_ha_state()
         await self.coordinator.send_command("activate_mode", mode_id=self._mode_id)
+        self._optimistic = None
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs) -> None:
+        self._optimistic = False
+        self.async_write_ha_state()
         await self.coordinator.send_command("deactivate_mode", mode_id=self._mode_id)
+        self._optimistic = None
+        await self.coordinator.async_request_refresh()
 
 
 class PcsAgentAppSwitch(CoordinatorEntity, SwitchEntity):

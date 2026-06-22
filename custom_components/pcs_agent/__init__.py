@@ -270,6 +270,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await async_setup_dashboard(hass, entry, coordinator)
 
+    # Push live via SSE (l'agent spinge lo stato on-change; il poll resta solo come
+    # fallback/heartbeat). Si auto-disattiva sugli agent vecchi senza /events.
+    coordinator.async_start_sse()
+    entry.async_on_unload(
+        lambda: hass.async_create_task(coordinator.async_stop_sse())
+    )
+
     return True
 
 
@@ -296,6 +303,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         coordinator: PcsAgentCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.async_stop_sse()
         if coordinator._session and not coordinator._session.closed:
             await coordinator._session.close()
     return unload_ok

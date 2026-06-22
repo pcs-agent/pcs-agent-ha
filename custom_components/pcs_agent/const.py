@@ -8,4 +8,4 @@ CONF_HA_SECRET = "ha_secret"
 CONF_HOST = "host"          # IP LAN dell'agent (local-only)
 CONF_PORT = "port"
 AGENT_PORT = 8765           # porta HTTP locale agent (/state, comandi)
-SCAN_INTERVAL = 5
+SCAN_INTERVAL = 3

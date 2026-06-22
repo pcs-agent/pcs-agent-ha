@@ -1,4 +1,6 @@
 from datetime import timedelta
+import asyncio
+import json
 import logging
 import aiohttp
 
@@ -27,6 +29,7 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
         self._session: aiohttp.ClientSession | None = None
         # id della pipeline Assist "Talk to {PC}" auto-creata (per la card talkback)
         self._talkback_pipeline_id: str | None = None
+        self._sse_task: asyncio.Task | None = None
 
     @property
     def _base(self) -> str:
@@ -34,6 +37,59 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
 
     def async_push_update(self, data: dict) -> None:
         self.async_set_updated_data(data)
+
+    def async_start_sse(self) -> None:
+        """Avvia il consumer SSE (push live). Mentre è connesso il poll rallenta a 30s
+        (solo heartbeat/riconnessione); se SSE cade o l'agent è vecchio (404), torna
+        al poll veloce. Idempotente."""
+        if self._sse_task is None or self._sse_task.done():
+            self._sse_task = self.hass.async_create_background_task(
+                self._sse_loop(), "pcs_agent_sse"
+            )
+
+    async def async_stop_sse(self) -> None:
+        if self._sse_task is not None:
+            self._sse_task.cancel()
+            self._sse_task = None
+        self.update_interval = timedelta(seconds=SCAN_INTERVAL)
+
+    async def _sse_loop(self) -> None:
+        while True:
+            try:
+                async with self._get_session().get(
+                    f"{self._base}/events",
+                    timeout=aiohttp.ClientTimeout(total=None, sock_connect=5),
+                ) as resp:
+                    if resp.status == 404:
+                        return  # agent vecchio senza /events → resta sul poll veloce
+                    if resp.status != 200:
+                        raise aiohttp.ClientError(f"HTTP {resp.status}")
+                    # connesso: lo stato arriva push → poll solo come heartbeat lento
+                    self.update_interval = timedelta(seconds=30)
+                    buf = b""
+                    async for chunk in resp.content.iter_any():
+                        buf += chunk
+                        while b"\n\n" in buf:
+                            raw, buf = buf.split(b"\n\n", 1)
+                            for line in raw.split(b"\n"):
+                                if line.startswith(b"data:"):
+                                    try:
+                                        self.async_set_updated_data(
+                                            json.loads(line[5:].strip())
+                                        )
+                                    except Exception:  # noqa: BLE001
+                                        pass
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                pass
+            # disconnesso → poll veloce di sicurezza + refresh, poi ritenta
+            self.update_interval = timedelta(seconds=SCAN_INTERVAL)
+            try:
+                await self.async_request_refresh()
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(5)
 
     def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
