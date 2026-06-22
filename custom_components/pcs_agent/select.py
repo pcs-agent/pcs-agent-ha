@@ -24,10 +24,19 @@ async def async_setup_entry(
 
     @callback
     def _check_new_modes() -> None:
+        from homeassistant.helpers import entity_registry as er
         new_entities: list[SelectEntity] = []
         for mode_id, mode_data in coordinator._get_modes().items():
             if mode_data.get("mode_type") == "loop":
-                continue  # le mode 'loop' sono uno SWITCH (on/off), vedi switch.py — non una tendina
+                # le mode 'loop' sono uno SWITCH (on/off), vedi switch.py — non una tendina.
+                # Se esisteva già un select (mode era 'once' prima, o creato da una versione
+                # precedente) va RIMOSSO dal registry, altrimenti resta una dropdown fantasma.
+                reg = er.async_get(hass)
+                stale = reg.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode_{mode_id}")
+                if stale:
+                    reg.async_remove(stale)
+                known_modes.add(mode_id)
+                continue
             if mode_id not in known_modes:
                 known_modes.add(mode_id)
                 new_entities.append(
