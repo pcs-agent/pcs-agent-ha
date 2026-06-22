@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 import asyncio
 import json
 import logging
@@ -10,6 +11,20 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, SCAN_INTERVAL, AGENT_PORT
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _read_integration_version() -> str:
+    """Versione dichiarata nel manifest → inviata all'agent (header) così l'app PC Agent
+    può avvisare quando esiste un update HACS più nuovo di quello installato."""
+    try:
+        return json.loads(
+            (Path(__file__).parent / "manifest.json").read_text(encoding="utf-8")
+        ).get("version", "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+INTEGRATION_VERSION = _read_integration_version()
 
 
 class PcsAgentCoordinator(DataUpdateCoordinator):
@@ -58,6 +73,7 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
             try:
                 async with self._get_session().get(
                     f"{self._base}/events",
+                    headers={"X-Integration-Version": INTEGRATION_VERSION},
                     timeout=aiohttp.ClientTimeout(total=None, sock_connect=5),
                 ) as resp:
                     if resp.status == 404:
@@ -100,6 +116,7 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
         try:
             async with self._get_session().get(
                 f"{self._base}/state",
+                headers={"X-Integration-Version": INTEGRATION_VERSION},
                 timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 if resp.status == 200:
