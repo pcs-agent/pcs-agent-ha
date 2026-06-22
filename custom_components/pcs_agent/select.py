@@ -26,6 +26,8 @@ async def async_setup_entry(
     def _check_new_modes() -> None:
         new_entities: list[SelectEntity] = []
         for mode_id, mode_data in coordinator._get_modes().items():
+            if mode_data.get("mode_type") == "loop":
+                continue  # le mode 'loop' sono uno SWITCH (on/off), vedi switch.py — non una tendina
             if mode_id not in known_modes:
                 known_modes.add(mode_id)
                 new_entities.append(

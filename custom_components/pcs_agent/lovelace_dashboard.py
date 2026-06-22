@@ -235,14 +235,20 @@ def _build_cards_for_device(
             cards.extend(group)
 
     for mode_id, mode_data in coordinator._get_modes().items():
-        mode_eid = _eid(hass, "select", f"{eid}_mode_{mode_id}")
-        if mode_eid:
-            cards.append({
-                "type": "tile",
-                "entity": mode_eid,
-                "name": mode_data["name"],
-                "features": [{"type": "select-options"}],
-            })
+        if mode_data.get("mode_type") == "loop":
+            # mode 'loop' = switch on/off (stato reale)
+            mode_eid = _eid(hass, "switch", f"{eid}_loopmode_{mode_id}")
+            if mode_eid:
+                cards.append({"type": "tile", "entity": mode_eid, "name": mode_data["name"]})
+        else:
+            mode_eid = _eid(hass, "select", f"{eid}_mode_{mode_id}")
+            if mode_eid:
+                cards.append({
+                    "type": "tile",
+                    "entity": mode_eid,
+                    "name": mode_data["name"],
+                    "features": [{"type": "select-options"}],
+                })
 
     return cards
 

@@ -18,6 +18,7 @@ async def async_setup_entry(
 ) -> None:
     coordinator: PcsAgentCoordinator = hass.data[DOMAIN][entry.entry_id]
     known_apps: set[str] = set()
+    known_loop_modes: set[str] = set()
 
     async_add_entities([
         PcsAgentMonitorSwitch(coordinator, entry),
@@ -32,6 +33,15 @@ async def async_setup_entry(
                 known_apps.add(app_id)
                 new_entities.append(
                     PcsAgentAppSwitch(coordinator, entry, app_id, app_data["name"])
+                )
+        # le mode 'loop' = interruttore on/off con stato reale (once = select, vedi select.py)
+        for mode_id, mode_data in coordinator._get_modes().items():
+            if mode_data.get("mode_type") != "loop":
+                continue
+            if mode_id not in known_loop_modes:
+                known_loop_modes.add(mode_id)
+                new_entities.append(
+                    PcsAgentModeSwitch(coordinator, entry, mode_id, mode_data["name"])
                 )
         if new_entities:
             async_add_entities(new_entities)
@@ -84,6 +94,35 @@ class PcsAgentLockSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         pass
+
+
+class PcsAgentModeSwitch(CoordinatorEntity, SwitchEntity):
+    """Mode 'loop' = interruttore on/off. is_on riflette lo STATO REALE (active da /state):
+    se il loop si auto-ferma (es. muovi il mouse sul PC) lo switch va OFF da solo."""
+    _attr_icon = "mdi:cog-sync"
+
+    def __init__(
+        self,
+        coordinator: PcsAgentCoordinator,
+        entry: ConfigEntry,
+        mode_id: str,
+        mode_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._mode_id = mode_id
+        self._attr_unique_id = f"{entry.entry_id}_loopmode_{mode_id}"
+        self._attr_name = mode_name
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)})
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.coordinator._get_modes().get(self._mode_id, {}).get("active", False))
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self.coordinator.send_command("activate_mode", mode_id=self._mode_id)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.coordinator.send_command("deactivate_mode", mode_id=self._mode_id)
 
 
 class PcsAgentAppSwitch(CoordinatorEntity, SwitchEntity):

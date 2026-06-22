@@ -86,9 +86,10 @@ class PcsAgentCoordinator(DataUpdateCoordinator):
         result = {}
         for mode_id, val in modes_raw.items():
             if isinstance(val, dict):
-                result[mode_id] = {"name": val.get("name", mode_id), "active": bool(val.get("active", False))}
+                result[mode_id] = {"name": val.get("name", mode_id), "active": bool(val.get("active", False)),
+                                   "mode_type": (val.get("mode_type") or "once")}
             else:
-                result[mode_id] = {"name": mode_id, "active": bool(val)}
+                result[mode_id] = {"name": mode_id, "active": bool(val), "mode_type": "once"}
         return result
 
     @property
