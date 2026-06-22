@@ -196,17 +196,17 @@ class PcsAgentAppPlayer(CoordinatorEntity, MediaPlayerEntity):
         return self._coord_volume()
 
     async def async_set_volume_level(self, volume: float) -> None:
-        # app Windows ascolta "set_volume_app" con campo "app_name"
+        # l'agent risolve l'app via app_id (su Windows app_name != app_id → serve l'id)
         self._set_optimistic(volume)
-        await self.coordinator.send_command("set_volume_app", app_name=self._app_id, volume_level=int(volume * 100))
+        await self.coordinator.send_command("set_volume_app", app_id=self._app_id, volume_level=int(volume * 100))
         await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
         self._set_optimistic((self.volume_level or self._coord_volume()) + 0.05)
-        await self.coordinator.send_command("adjust_volume_app", app_name=self._app_id, volume_delta=5)
+        await self.coordinator.send_command("adjust_volume_app", app_id=self._app_id, volume_delta=5)
         await self.coordinator.async_request_refresh()
 
     async def async_volume_down(self) -> None:
         self._set_optimistic((self.volume_level or self._coord_volume()) - 0.05)
-        await self.coordinator.send_command("adjust_volume_app", app_name=self._app_id, volume_delta=-5)
+        await self.coordinator.send_command("adjust_volume_app", app_id=self._app_id, volume_delta=-5)
         await self.coordinator.async_request_refresh()

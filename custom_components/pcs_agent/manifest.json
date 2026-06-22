@@ -1,7 +1,7 @@
 {
     "domain": "pcs_agent",
     "name": "PC Agent",
-    "version": "3.2.2",
+    "version": "3.2.3",
     "config_flow": true,
     "documentation": "https://github.com/edoardobommarito/pcs-agent",
     "issue_tracker": "https://github.com/edoardobommarito/pcs-agent/issues",
